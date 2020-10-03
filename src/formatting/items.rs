@@ -204,12 +204,7 @@ impl<'a> Item<'a> {
     ) -> Item<'a> {
         Item {
             unsafety: fm.unsafety,
-            abi: format_extern(
-                ast::Extern::from_abi(fm.abi),
-                config.force_explicit_abi(),
-                true,
-                Some(attrs),
-            ),
+            abi: format_extern(ast::Extern::from_abi(fm.abi), &config, true, Some(attrs)),
             vis: None,
             body: fm
                 .items
@@ -304,12 +299,7 @@ impl<'a> FnSig<'a> {
         result.push_str(format_constness(self.constness));
         result.push_str(format_async(*self.is_async));
         result.push_str(format_unsafety(self.unsafety));
-        result.push_str(&format_extern(
-            self.ext,
-            context.config.force_explicit_abi(),
-            false,
-            None,
-        ));
+        result.push_str(&format_extern(self.ext, &context.config, false, None));
         result
     }
 }
@@ -322,28 +312,27 @@ impl<'a> FmtVisitor<'a> {
         let snippet = self.snippet(item.span);
         let brace_pos = snippet.find_uncommented("{").unwrap();
 
+        // Manage brace style after extern block prefix
+        if self.config.brace_style() == BraceStyle::AlwaysNextLine {
+            // Comments don't count as body content apparently
+            let nothing_in_body = item.body.is_empty() && !contains_comment(&snippet[brace_pos..]);
+            // Keep the empty block opening brace on the same line with a whitespace
+            if nothing_in_body {
+                self.push_str(" {");
+            } else {
+                let indent_str = format!(
+                    "{}{}",
+                    self.shape().indent.to_string_with_newline(self.config),
+                    "{"
+                );
+                self.push_str(&indent_str);
+            }
+        } else {
+            self.push_str("{");
+        }
+
+        // Manage content of extern block
         if !item.body.is_empty() || contains_comment(&snippet[brace_pos..]) {
-            // configure opening brace style
-            let brace_style = self.config.brace_style();
-            match brace_style {
-                BraceStyle::AlwaysNextLine => {
-                    // ensure we don't allow a space at the end so the line doesn't end with a space
-                    // (caused by &item.abi above => 'extern "C" ')
-                    if self.buffer.ends_with(' ') {
-                        self.buffer.pop();
-                    }
-
-                    let nested_indent = self.shape().indent;
-                    let line = &format!(
-                        "{}{}",
-                        nested_indent.to_string_with_newline(self.config),
-                        "{"
-                    );
-                    self.push_str(line);
-                }
-                _ => self.push_str("{"),
-            };
-
             // FIXME: this skips comments between the extern keyword and the opening
             // brace.
             self.last_pos = item.span.lo() + BytePos(brace_pos as u32 + 1);
@@ -367,11 +356,10 @@ impl<'a> FmtVisitor<'a> {
                 self.block_indent = self.block_indent.block_unindent(self.config);
                 self.format_missing_with_indent(item.span.hi() - BytePos(1));
             }
-
-            self.push_str("}");
-        } else {
-            self.push_str("{}");
         }
+
+        // Close the extern block
+        self.push_str("}");
 
         self.last_pos = item.span.hi();
     }

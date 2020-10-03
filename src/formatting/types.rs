@@ -793,12 +793,7 @@ fn rewrite_bare_fn(
 
     result.push_str(format_unsafety(bare_fn.unsafety));
 
-    result.push_str(&format_extern(
-        bare_fn.ext,
-        context.config.force_explicit_abi(),
-        false,
-        None,
-    ));
+    result.push_str(&format_extern(bare_fn.ext, &context.config, false, None));
 
     result.push_str("fn");
 

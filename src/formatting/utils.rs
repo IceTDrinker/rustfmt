@@ -9,7 +9,7 @@ use rustc_ast_pretty::pprust;
 use rustc_span::{sym, symbol, BytePos, ExpnId, Span, Symbol, SyntaxContext};
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::Config;
+use crate::config::{BraceStyle, Config};
 use crate::emitter::Verbosity;
 use crate::formatting::{
     comment::{filter_normal_code, CharClasses, FullCodeCharKind, LineClasses},
@@ -148,13 +148,24 @@ pub(crate) fn format_mutability(mutability: ast::Mutability) -> &'static str {
 #[inline]
 pub(crate) fn format_extern(
     ext: ast::Extern,
-    explicit_abi: bool,
+    config: &Config,
     is_mod: bool,
     attrs: Option<&[ast::Attribute]>,
 ) -> Cow<'static, str> {
-    let format_explicit_abi = |abi: &str| Cow::from(format!(r#"extern "{}" "#, abi));
+    let explicit_abi = config.force_explicit_abi();
+    let format_explicit_abi = match config.brace_style() {
+        BraceStyle::AlwaysNextLine if is_mod => {
+            |abi: &str| Cow::from(format!(r#"extern "{}""#, abi))
+        }
+        _ => |abi: &str| Cow::from(format!(r#"extern "{}" "#, abi)),
+    };
     let explicit_conversion_preserves_semantics =
         || !is_mod || attrs.map_or(true, |a| a.is_empty());
+
+    let implicit_extern_abi = match config.brace_style() {
+        BraceStyle::AlwaysNextLine if is_mod => Cow::from("extern"),
+        _ => Cow::from("extern "),
+    };
 
     match ext {
         ast::Extern::None if !is_mod => Cow::from(""),
@@ -162,11 +173,11 @@ pub(crate) fn format_extern(
             symbol_unescaped, ..
         }) if !is_mod && symbol_unescaped == rustc_span::sym::rust => Cow::from(""),
         ast::Extern::Implicit if !explicit_abi || !explicit_conversion_preserves_semantics() => {
-            Cow::from("extern ")
+            implicit_extern_abi
         }
         ast::Extern::Explicit(ast::StrLit {
             symbol_unescaped, ..
-        }) if !explicit_abi && symbol_unescaped == rustc_span::sym::C => Cow::from("extern "),
+        }) if !explicit_abi && symbol_unescaped == rustc_span::sym::C => implicit_extern_abi,
         ast::Extern::None => format_explicit_abi("Rust"),
         ast::Extern::Implicit => format_explicit_abi("C"),
         ast::Extern::Explicit(ast::StrLit {
